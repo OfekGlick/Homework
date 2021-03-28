@@ -100,7 +100,7 @@ def fit_rational_normed(X: np.ndarray):
     A = np.concatenate(
         (-1 * np.ones((n, 1)), (-1 * X[0]).reshape(n, 1), (-1 * X[0] * X[0]).reshape(n, 1), X[1].reshape((n, 1)),
          (X[0] * X[1]).reshape(n, 1), (X[0] * X[0] * X[1]).reshape(n, 1)), axis=1)
-    sol = np.linalg.eig(A.T @ A)[1][:, -1]
+    sol = np.linalg.eigh(A.T @ A)[1][:, 0]
     plot_graph(X, sol, 'normed')
     return sol
 
