@@ -75,7 +75,7 @@ def generic_hybrid(f, df, ddf, l, u, eps1, eps2, k):
     check_validity(generic_hybrid, l, u, eps1, eps2, k)
     fv = []
     x = u
-    while abs(u - l) > eps1 and abs(df(x)) > eps2:
+    while abs(u - l) > eps1 and abs(df(x)) > eps2 and k >= 0:
         new_x = x - df(x) / ddf(x)
         x = new_x if l < new_x < u and abs(df(new_x)) < 0.99 * abs(df(x)) else (l + u) / 2
         fv.append(f(x))
@@ -83,6 +83,7 @@ def generic_hybrid(f, df, ddf, l, u, eps1, eps2, k):
             u = x
         else:
             l = x
+        k -= 1
     return x, fv
 
 
