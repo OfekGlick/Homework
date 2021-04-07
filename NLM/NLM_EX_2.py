@@ -61,7 +61,7 @@ def generic_bisect(f, df, l, u, eps, k):
 def generic_newton_action(f, df, ddf, x0, eps, k, fv: list):
     new_x0 = x0 - df(x0) / ddf(x0)
     fv.append(f(new_x0))
-    if k < 0 or abs(new_x0 - x0) < eps:
+    if k < 0 or df(new_x0) < eps:
         return new_x0, fv
     return generic_newton_action(f, df, ddf, new_x0, eps, k - 1, fv)
 
