@@ -8,20 +8,41 @@ import copy
 
 def LTM(graph: networkx.Graph, patients_0: List, iterations: int) -> Set:
     total_infected = set(patients_0)
-    # TODO implement your code here
+    susceptible = graph.nodes - total_infected
+    susceptible_nodes = {
+        node: sum([1 for node_1 in graph.neighbors(node) if node_1 in total_infected]) / graph.degree(node) for node in
+        susceptible}
+    infected_nodes = {node: 0 for node in total_infected}
+    networkx.set_node_attributes(graph, susceptible_nodes, "concerned")
+    networkx.set_node_attributes(graph, infected_nodes, "concerned")
+    while iterations > 0:
+        temp_infected = total_infected.copy()
+        temp_susceptible = susceptible.copy()
+        for node in susceptible:
+            sum_of_weights = CONTAGION * sum(
+                [graph.edges[(node_1, node_2)]["w"] for (node_1, node_2) in networkx.edges(graph, node) if
+                 node_2 in total_infected])
+            threshhold = 1 + graph.nodes[node]["concerned"]
+            if sum_of_weights >= threshhold:
+                temp_susceptible.remove(node)
+                temp_infected.add(node)
+        total_infected = temp_infected
+        susceptible = temp_susceptible
+        iterations -= 1
     return total_infected
 
 
 def ICM(graph: networkx.Graph, patients_0: List, iterations: int) -> [Set, Set]:
     total_infected = set(patients_0)
-    total_deceased = set()
+    susceptible = graph.nodes - total_infected
+    total_deceased = {}
     # TODO implement your code here
     return total_infected, total_deceased
 
 
 def plot_degree_histogram(histogram: Dict):
-    plt.bar(range(len(histogram)),list(histogram.values()),align='center')
-    plt.xticks(range(len(histogram)),list(histogram.values()))
+    plt.bar(range(len(histogram)), list(histogram.values()), align='center')
+    plt.xticks(range(len(histogram)), list(histogram.values()))
     plt.show()
 
 
@@ -45,7 +66,7 @@ def build_graph(filename: str) -> networkx.Graph:
     df = pd.read_csv(filename)
     _, col = df.shape
     if col == 2:
-        df['weight'] = 1
+        df['w'] = 1
     source, target, att = df.columns
     G = networkx.from_pandas_edgelist(df, source, target, att)
     return G
@@ -93,19 +114,30 @@ def choose_who_to_vaccinate_example(graph: networkx.Graph) -> List:
 
 
 "Global Hyper-parameters"
-CONTAGION = 1
+CONTAGION = 2
 LETHALITY = .15
 
 if __name__ == "__main__":
-    filename = "PartA1.csv"
-    G = build_graph(filename=filename)
-    hist = calc_degree_histogram(G)
-    plot_degree_histogram(hist)
-    filename = "PartA2.csv"
-    G = build_graph(filename=filename)
-    hist = calc_degree_histogram(G)
-    plot_degree_histogram(hist)
     filename = "PartB-C.csv"
     G = build_graph(filename=filename)
-    hist = calc_degree_histogram(G)
-    plot_degree_histogram(hist)
+    inf = [0]
+    bla = LTM(G, inf, 1)
+    bla2 = LTM(G, inf, 2)
+    bla3 = LTM(G, inf, 3)
+    bla4 = LTM(G, inf, 6)
+
+    print(len(bla))
+    print(len(bla2))
+    print(len(bla3))
+    print(len(bla4))
+
+    # hist = calc_degree_histogram(G)
+    # plot_degree_histogram(hist)
+    # filename = "PartA2.csv"
+    # G = build_graph(filename=filename)
+    # hist = calc_degree_histogram(G)
+    # plot_degree_histogram(hist)
+    # filename = "PartB-C.csv"
+    # G = build_graph(filename=filename)
+    # hist = calc_degree_histogram(G)
+    # plot_degree_histogram(hist)
