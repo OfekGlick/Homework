@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from numba import njit
 
-
+@njit
 def action1(A: np.ndarray, x: np.ndarray, n):
     """
     Helper method for ex1, does the calculation of B
@@ -18,7 +19,7 @@ def action1(A: np.ndarray, x: np.ndarray, n):
     np.fill_diagonal(B, 0)
     return B
 
-
+@njit
 def ex1(A: np.ndarray, x: np.ndarray):
     """
     Converts A and x into B according to the specifications in the exercise.
@@ -34,7 +35,7 @@ def ex1(A: np.ndarray, x: np.ndarray):
     else:
         raise TypeError("Invalid input, A needs to be square ndarray and x needs to conform in dimensionality")
 
-
+@njit
 def action2(A: np.ndarray, B: np.ndarray, n: int, b: np.ndarray):
     """
     Helper method for ex2, does the calculation of Qz
@@ -50,7 +51,7 @@ def action2(A: np.ndarray, B: np.ndarray, n: int, b: np.ndarray):
     Q = np.kron(A, P)
     return np.linalg.solve(Q, z)
 
-
+@njit
 def ex2(A: np.ndarray, B: np.ndarray, n: int, b: np.ndarray):
     """
     Calculates Qz as specified in the exercise
@@ -82,7 +83,7 @@ def plot_graph(X: np.ndarray, coefficients, name: str):
     plt.savefig('fig_' + name + ".png")
     plt.clf()
 
-
+@njit
 def fit_rational(X: np.ndarray):
     (m, n) = X.shape
     b = -1 * X[1]
@@ -94,7 +95,7 @@ def fit_rational(X: np.ndarray):
     plot_graph(X, sol, 'not_normed')
     return sol
 
-
+@njit
 def fit_rational_normed(X: np.ndarray):
     (m, n) = X.shape
     A = np.concatenate(
@@ -106,17 +107,22 @@ def fit_rational_normed(X: np.ndarray):
 
 
 def main():
+    import time
     # Question 1
     A = np.array([[1, -2, 3, 7], [4, 5, 6, 7], [-7, 8, 9, 7], [10, -11, 12, 7]])
     x = np.array([[17], [6], [-3], [0]])
     print("Ex1:")
+    start = time.time()
     print(ex1(A, x))
+    print(time.time() - start)
     A = np.array(range(1, 10)).reshape((3, 3))
     B = A + np.ones((3, 3)) * 2
     b = np.array(range(1, 4)).reshape((3, 1))
     n = 4
     print("Ex2:")
+    start = time.time()
     print(ex2(A, B, n, b))
+    print(time.time() - start)
     X = np.array([[-0.966175231649752, -0.920529100440521, -0.871040946427231, -0.792416754493313, -0.731997794083466,
                    -0.707678784846507, -0.594776425699584, -0.542182374657374, -0.477652051223985, -0.414002394497506,
                    -0.326351540865686, -0.301458382421319, -0.143486910424499, -0.0878464728184052, -0.0350835941699658,
@@ -129,8 +135,10 @@ def main():
                    1.52592143155874, 1.42166345066052, 1.19058953217964, 1.23598301133586, 0.461229833080578,
                    0.940922128674924, 0.73146046340835, 0.444386541739061, 0.332335616103906, 0.285195114684272,
                    0.219953363135822, 0.234575259776606, 0.228396325882262, 0.451944920264431, 0.655793276158532]])
+    start = time.time()
     print(fit_rational(X))
     print(fit_rational_normed(X))
+    print(time.time() - start)
 
 
 if __name__ == '__main__':

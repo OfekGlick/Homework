@@ -36,13 +36,16 @@ def ICM(graph: networkx.Graph, patients_0: List, iterations: int) -> [Set, Set]:
     total_infected = set(patients_0)
     susceptible = graph.nodes - total_infected
     total_deceased = {}
-    # TODO implement your code here
+    susceptible_nodes = {
+        node: sum([1 for node_1 in graph.neighbors(node) if node_1 in total_infected]) +
+              (3 * sum([1 for node_1 in graph.neighbors(node) if node_1 in total_deceased]))
+              / graph.degree(node) for node in susceptible}
+
     return total_infected, total_deceased
 
 
 def plot_degree_histogram(histogram: Dict):
-    plt.bar(range(len(histogram)), list(histogram.values()), align='center')
-    plt.xticks(range(len(histogram)), list(histogram.values()))
+    plt.bar(histogram.keys(), histogram.values(), 2, align='center')
     plt.show()
 
 
@@ -118,26 +121,26 @@ CONTAGION = 2
 LETHALITY = .15
 
 if __name__ == "__main__":
+    filename = "PartA1.csv"
+    G = build_graph(filename=filename)
+    # inf = [0]
+    # bla = LTM(G, inf, 1)
+    # bla2 = LTM(G, inf, 2)
+    # bla3 = LTM(G, inf, 3)
+    # bla4 = LTM(G, inf, 6)
+    #
+    # print(len(bla))
+    # print(len(bla2))
+    # print(len(bla3))
+    # print(len(bla4))
+    #
+    hist = calc_degree_histogram(G)
+    plot_degree_histogram(hist)
+    filename = "PartA2.csv"
+    G = build_graph(filename=filename)
+    hist = calc_degree_histogram(G)
+    plot_degree_histogram(hist)
     filename = "PartB-C.csv"
     G = build_graph(filename=filename)
-    inf = [0]
-    bla = LTM(G, inf, 1)
-    bla2 = LTM(G, inf, 2)
-    bla3 = LTM(G, inf, 3)
-    bla4 = LTM(G, inf, 6)
-
-    print(len(bla))
-    print(len(bla2))
-    print(len(bla3))
-    print(len(bla4))
-
-    # hist = calc_degree_histogram(G)
-    # plot_degree_histogram(hist)
-    # filename = "PartA2.csv"
-    # G = build_graph(filename=filename)
-    # hist = calc_degree_histogram(G)
-    # plot_degree_histogram(hist)
-    # filename = "PartB-C.csv"
-    # G = build_graph(filename=filename)
-    # hist = calc_degree_histogram(G)
-    # plot_degree_histogram(hist)
+    hist = calc_degree_histogram(G)
+    plot_degree_histogram(hist)
