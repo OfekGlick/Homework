@@ -14,13 +14,14 @@ CONST = 3.58254399930370
 
 
 def check_validity(function, *args):
+    from numbers import Number
     if function == generic_bisect or function == generic_gs:
         l, u, eps, k = args
         if l >= u:
             raise ValueError("Must enter valid segment")
         elif eps < 0:
             raise ValueError("Epsilon must be a positive number")
-        elif k <= 0 or not isinstance(k, int):
+        elif k <= 0 or not isinstance(k, Number):
             raise ValueError("K number of moves must be a positive integer")
     elif function == generic_newton:
         x0, eps, k = args
