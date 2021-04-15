@@ -1,4 +1,4 @@
-from NLM_EX_2 import generic_gs
+from ex1 import generic_gs
 from matplotlib import pyplot as plt
 import numpy as np
 
@@ -11,7 +11,7 @@ def gs_denoise_step(mu, a, b, c):
 
 
 def gs_denoise(s, alpha, N):
-    x = s.copy()
+    x = np.copy(s)
     for i in range(N + 1):
         for k in range(len(x)):
             if k == 0:

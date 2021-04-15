@@ -9,7 +9,7 @@ import copy
 def calc_concerned_level(graph, infected, susceptible):
     susceptible_nodes = {
         node: sum([1 for node_1 in graph.neighbors(node) if node_1 in infected]) / graph.degree(node) for node in
-        susceptible}
+        susceptible if graph.degree(node) != 0}
     infected_nodes = {node: 0 for node in infected}
     return susceptible_nodes, infected_nodes
 
@@ -17,7 +17,8 @@ def calc_concerned_level(graph, infected, susceptible):
 def LTM(graph: networkx.Graph, patients_0: List, iterations: int) -> Set:
     total_infected = set(patients_0)
     susceptible = graph.nodes - total_infected
-    susceptible_nodes, infected_nodes = calc_concerned_level(graph, total_infected, susceptible)
+    susceptible_nodes = {node: 0 for node in susceptible}
+    infected_nodes = {node: 0 for node in total_infected}
     networkx.set_node_attributes(graph, susceptible_nodes, "concerned")
     networkx.set_node_attributes(graph, infected_nodes, "concerned")
     while iterations > 0:
@@ -31,11 +32,11 @@ def LTM(graph: networkx.Graph, patients_0: List, iterations: int) -> Set:
             if sum_of_weights >= threshhold:
                 temp_susceptible.remove(node)
                 temp_infected.add(node)
-        total_infected = temp_infected
-        susceptible = temp_susceptible
         susceptible_nodes, infected_nodes = calc_concerned_level(graph, total_infected, susceptible)
         networkx.set_node_attributes(graph, susceptible_nodes, "concerned")
         networkx.set_node_attributes(graph, infected_nodes, "concerned")
+        total_infected = temp_infected
+        susceptible = temp_susceptible
         iterations -= 1
     return total_infected
 
@@ -44,17 +45,17 @@ def calc_concerned_level_ICM(graph, susceptible, infected, removed):
     susceptible_nodes = {
         node: min((sum([1 for node_1 in graph.neighbors(node) if node_1 in infected]) +
                    (3 * sum([1 for node_1 in graph.neighbors(node) if node_1 in removed])))
-                  / graph.degree(node), 1) for node in susceptible}
+                  / graph.degree(node), 1) for node in susceptible if graph.degree(node) != 0}
     infected_nodes = {node: 0 for node in infected}
     return susceptible_nodes, infected_nodes
 
 
 def ICM(graph: networkx.Graph, patients_0: List, iterations: int) -> [Set, Set]:
-    # Intitalize first sets
     total_infected = set(patients_0)
     susceptible = set(graph.nodes) - total_infected
     total_deceased = set()
-    susceptible_nodes, infected_nodes = calc_concerned_level_ICM(graph, susceptible, total_infected, total_deceased)
+    susceptible_nodes = {node: 0 for node in susceptible}
+    infected_nodes = {node: 0 for node in total_infected}
     networkx.set_node_attributes(graph, susceptible_nodes, "concerned")
     networkx.set_node_attributes(graph, infected_nodes, "concerned")
     for node in total_infected:
@@ -81,11 +82,12 @@ def ICM(graph: networkx.Graph, patients_0: List, iterations: int) -> [Set, Set]:
                         temp_susceptible.remove(neighbor)
                     except KeyError:
                         continue
+
+        networkx.set_node_attributes(graph, susceptible_nodes, "concerned")
+        networkx.set_node_attributes(graph, infected_nodes, "concerned")
         susceptible = temp_susceptible
         total_infected = set.union(total_infected, NI_temp)
         susceptible_nodes, infected_nodes = calc_concerned_level_ICM(graph, susceptible, total_infected, total_deceased)
-        networkx.set_node_attributes(graph, susceptible_nodes, "concerned")
-        networkx.set_node_attributes(graph, infected_nodes, "concerned")
         NI = NI_temp
         iterations -= 1
     return total_infected, total_deceased
@@ -177,26 +179,20 @@ LETHALITY = .2
 if __name__ == "__main__":
     filename = ["PartA1.csv", "PartA2.csv", "PartB-C.csv"]
     patients = "patients0.csv"
-    import csv
-
-    with open(patients) as file:
-        reader = csv.reader(file)
-        inf = list(*zip(*reader))
-        inf = [int(x) for x in inf]
     G = build_graph(filename=filename[2])
-    bla1, bla2 = compute_lethality_effect(G, 6)
-    # bla1 = {0.15: 234, 0.30: 345}
-    # bla2 = {0.15: 534, 0.30: 355}
-    plot_lethality_effect(bla1, bla2)
+    patients0 = list(pd.read_csv('patients0.csv', header=None)[:50][0].values.tolist())
+    fi = []
+    fr = []
+    bla1, bla2 = ICM(G, patients0[:50], 6)
     print(len(bla1), len(bla2))
 
-    # hist = calc_degree_histogram(G)
-    # plot_degree_histogram(hist)
-    # filename = "PartA2.csv"
-    # G = build_graph(filename=filename)
-    # hist = calc_degree_histogram(G)
-    # plot_degree_histogram(hist)
-    # filename = "PartB-C.csv"
-    # G = build_graph(filename=filename)
-    # hist = calc_degree_histogram(G)
-    # plot_degree_histogram(hist)
+# hist = calc_degree_histogram(G)
+# plot_degree_histogram(hist)
+# filename = "PartA2.csv"
+# G = build_graph(filename=filename)
+# hist = calc_degree_histogram(G)
+# plot_degree_histogram(hist)
+# filename = "PartB-C.csv"
+# G = build_graph(filename=filename)
+# hist = calc_degree_histogram(G)
+# plot_degree_histogram(hist)
