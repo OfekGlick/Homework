@@ -46,8 +46,7 @@ def calc_concerned_level_ICM(graph, susceptible, infected, removed):
         node: min((sum([1 for node_1 in graph.neighbors(node) if node_1 in infected]) +
                    (3 * sum([1 for node_1 in graph.neighbors(node) if node_1 in removed])))
                   / graph.degree(node), 1) for node in susceptible if graph.degree(node) != 0}
-    infected_nodes = {node: 0 for node in infected}
-    return susceptible_nodes, infected_nodes
+    return susceptible_nodes
 
 
 def ICM(graph: networkx.Graph, patients_0: List, iterations: int) -> [Set, Set]:
@@ -55,18 +54,17 @@ def ICM(graph: networkx.Graph, patients_0: List, iterations: int) -> [Set, Set]:
     susceptible = set(graph.nodes) - total_infected
     total_deceased = set()
     susceptible_nodes = {node: 0 for node in susceptible}
-    infected_nodes = {node: 0 for node in total_infected}
     networkx.set_node_attributes(graph, susceptible_nodes, "concerned")
-    networkx.set_node_attributes(graph, infected_nodes, "concerned")
     for node in total_infected:
         prob = np.random.random()
-        if prob < LETHALITY:
+        if prob <= LETHALITY:
             total_deceased.add(node)
     total_infected = total_infected - total_deceased
     NI = total_infected.copy()
     while iterations > 0:
         temp_susceptible = susceptible.copy()
         NI_temp = set()
+        temp_deceased = set()
         for node in NI:
             sus_neighbors = {node_2 for node_2 in graph.neighbors(node) if node_2 in susceptible}
             for neighbor in sus_neighbors:
@@ -74,21 +72,22 @@ def ICM(graph: networkx.Graph, patients_0: List, iterations: int) -> [Set, Set]:
                 if inf_prob <= min(1, CONTAGION * graph.edges[(node, neighbor)]['w'] * (
                         1 - graph.nodes[neighbor]["concerned"])):
                     death_prob = np.random.random()
-                    if death_prob <= LETHALITY:
-                        total_deceased.add(neighbor)
-                    else:
-                        NI_temp.add(neighbor)
-                    try:
-                        temp_susceptible.remove(neighbor)
-                    except KeyError:
-                        continue
+                    if neighbor in temp_susceptible:
+                        if death_prob <= LETHALITY:
+                            temp_deceased.add(neighbor)
+                        else:
+                            NI_temp.add(neighbor)
+                        try:
+                            temp_susceptible.remove(neighbor)
+                        except KeyError:
+                            continue
 
+        susceptible = temp_susceptible.copy()
+        susceptible_nodes = calc_concerned_level_ICM(graph, susceptible, total_infected, total_deceased)
         networkx.set_node_attributes(graph, susceptible_nodes, "concerned")
-        networkx.set_node_attributes(graph, infected_nodes, "concerned")
-        susceptible = temp_susceptible
         total_infected = set.union(total_infected, NI_temp)
-        susceptible_nodes, infected_nodes = calc_concerned_level_ICM(graph, susceptible, total_infected, total_deceased)
-        NI = NI_temp
+        total_deceased = set.union(total_deceased, temp_deceased)
+        NI = NI_temp.copy()
         iterations -= 1
     return total_infected, total_deceased
 
@@ -180,12 +179,16 @@ if __name__ == "__main__":
     filename = ["PartA1.csv", "PartA2.csv", "PartB-C.csv"]
     patients = "patients0.csv"
     G = build_graph(filename=filename[2])
-    patients0 = list(pd.read_csv('patients0.csv', header=None)[:50][0].values.tolist())
+    patients0 = set(pd.read_csv('patients0.csv', header=None)[:50][0].values.tolist())
     fi = []
     fr = []
-    bla1, bla2 = ICM(G, patients0[:50], 6)
-    print(len(bla1), len(bla2))
-
+    for j in range(30):
+        i, r = ICM(G, patients0, 6)
+        fi.append(len(i))
+        fr.append(len(r))
+        print(j, ":\n", len(i), i, "\n", len(r), r)
+    print(np.average(np.array(fi)))
+    print(np.average(np.array(fr)))
 # hist = calc_degree_histogram(G)
 # plot_degree_histogram(hist)
 # filename = "PartA2.csv"
