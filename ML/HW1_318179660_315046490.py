@@ -19,7 +19,6 @@ class KnnClassifier:
         self.p = p
         self.train_set = []
         self.train_label = []
-        # TODO - Place your student IDs here. Single submitters please use a tuple like so: self.ids = (123456789,)
         self.ids = (315046490, 318179660)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
@@ -35,17 +34,32 @@ class KnnClassifier:
         self.train_label = y
 
     def _single_predict(self, sample):
+        """
+        Predicts the label of a single sample
+        :param sample: sample to predict it's label, ndarray type.
+        :return: integer representing the label.
+        """
+        # Creating a lambda function to calculated distance between two given vectors
         single_dist = lambda x: sum((x[0] - x[1]) ** self.p) ** (1 / self.p)
+        # Create a local copy of the training set
         train_set = np.array(self.train_set)
+        # Create a matrix where every row is the given sample point
         helper_mat = np.ones(train_set.shape) * sample
+        # Calculate the distance for each point in the training set using single dist
         dist = np.fromiter(map(single_dist, zip(helper_mat, train_set)), dtype=np.float64)
+        # Sort the closest neighbors based on distance and lexicographic order
         dist_and_label = sorted(sorted(list(zip(dist, self.train_label)), key=lambda x: x[1]), key=lambda x: x[0])[
                          :self.k]
+        # Count the different labels and save them in a dictionary
         from collections import Counter
         counter = dict(Counter(list(zip(*dist_and_label))[1])).items()
+        # Get the maximum appearance value of most common label
         max_label_appearance = max(counter, key=lambda x: x[1])[1]
+        # Convert to ndarray for convince purposes
         counter = np.array(list(counter))
+        # Filter only the rows containing the maximum appearances
         counter = counter[np.where(counter[:, 1] == max_label_appearance)].tolist()
+        # Return the first label in the most common label array.
         chosen_label = counter[0][0]
         return chosen_label
 
@@ -58,12 +72,9 @@ class KnnClassifier:
             Array datatype is guaranteed to be np.float32.
         :return: A 1-dimensional numpy array of m rows. Should be of datatype np.uint8.
         """
-        predictions = np.array(list(map(self._single_predict, X)))
-        ofek = 5
-        return predictions
 
-        ### Example code - don't use this:
-        # return np.random.randint(low=0, high=2, size=len(X), dtype=np.uint8)
+        predictions = np.array(list(map(self._single_predict, X)))
+        return predictions
 
 
 def main():
