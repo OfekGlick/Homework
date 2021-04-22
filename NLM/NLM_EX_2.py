@@ -2,8 +2,8 @@ import math
 from matplotlib import pyplot as plt
 
 F = lambda x: x ** 2 + (x ** 2 - 3 * x + 10) / (2 + x)
-DF = lambda x: 2 * x + ((2 * x - 3) * (2 + x) - (x ** 2 - 3 * x + 10)) / ((2 + x) ** 2)
-DDF = lambda x: 2 + ((2 * x + 6) * (x + 2) ** 2 - 2 * (2 + x) * (x ** 2 - 6 * x - 16)) / (2 + x) ** 4
+DF = lambda x: 2 * x + 1 - 20 / ((x + 2) ** 2)
+DDF = lambda x: 2 + 40 / ((x + 2) ** 3)
 LOWER_BOUND = -1
 UPPER_BOUND = 5
 EPSILON = 10 ** -6
@@ -62,7 +62,8 @@ def generic_bisect(f, df, l, u, eps, k):
 def generic_newton_action(f, df, ddf, x0, eps, k, fv: list):
     new_x0 = x0 - df(x0) / ddf(x0)
     fv.append(f(new_x0))
-    if k < 0 or df(new_x0) < eps:
+    if k < 0 or abs(df(new_x0)) < eps:
+        print(df(new_x0))
         return new_x0, fv
     return generic_newton_action(f, df, ddf, new_x0, eps, k - 1, fv)
 
