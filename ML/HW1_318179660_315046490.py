@@ -5,6 +5,7 @@ import time
 import itertools
 import numpy as np
 import pandas as pd
+from sklearn.neighbors import KNeighborsClassifier
 
 
 class KnnClassifier:
@@ -33,6 +34,15 @@ class KnnClassifier:
         self.train_set = X
         self.train_label = y
 
+    def _tie_break(self, winning_labels, distances, labels):
+        indecies = np.isin(labels, winning_labels)
+        distances = distances[indecies]
+        min_distance = min(distances)
+        closest_winners = np.where(distances == min_distance)
+        closest_winners_label = labels[closest_winners]
+        closest_winners_label_sorted = sorted(closest_winners_label)
+        return closest_winners_label_sorted[0]
+
     def _single_predict(self, sample):
         """
         Predicts the label of a single sample
@@ -40,26 +50,26 @@ class KnnClassifier:
         :return: integer representing the label.
         """
         # Creating a lambda function to calculated distance between two given vectors
-        single_dist = lambda x: sum((x[0] - x[1]) ** self.p) ** (1 / self.p)
+        single_dist = lambda x: sum((abs(x[0] - x[1])) ** self.p) ** (1. / self.p)
         # Create a local copy of the training set
         train_set = np.array(self.train_set)
         # Create a matrix where every row is the given sample point
         helper_mat = np.ones(train_set.shape) * sample
-        # Calculate the distance for each point in the training set using single dist
+        # Calculate the distance for each point in the training set using single_dist
         dist = np.fromiter(map(single_dist, zip(helper_mat, train_set)), dtype=np.float64)
-        # Sort the closest neighbors based on distance and lexicographic order
-        dist_and_label = sorted(sorted(list(zip(dist, self.train_label)), key=lambda x: x[1]), key=lambda x: x[0])[
-                         :self.k]
-        # Count the different labels and save them in a dictionary
+        dist_and_label = np.array(
+            sorted(sorted(list(zip(dist, self.train_label)), key=lambda x: x[1]), key=lambda x: x[0])[
+            :self.k])
         from collections import Counter
-        counter = dict(Counter(list(zip(*dist_and_label))[1])).items()
-        # Get the maximum appearance value of most common label
+        distances, labels = list(zip(*dist_and_label))
+        counter = dict(Counter(labels)).items()
+        distances = np.array(distances)
+        labels = np.array(labels)
         max_label_appearance = max(counter, key=lambda x: x[1])[1]
-        # Convert to ndarray for convince purposes
         counter = np.array(list(counter))
-        # Filter only the rows containing the maximum appearances
-        counter = counter[np.where(counter[:, 1] == max_label_appearance)].tolist()
-        # Return the first label in the most common label array.
+        counter = counter[np.where(counter[:, 1] == max_label_appearance)]
+        if len(counter) >= 2:
+            return self._tie_break(counter.T[0], distances, labels)
         chosen_label = counter[0][0]
         return chosen_label
 
@@ -89,25 +99,34 @@ def main():
 
     print("Processed input arguments:")
     print(f"csv = {args.csv}, k = {args.k}, p = {args.p}")
-
-    print("Initiating KnnClassifier")
-    model = KnnClassifier(k=args.k, p=args.p)
-    print(f"Student IDs: {model.ids}")
-    print(f"Loading data from {args.csv}...")
-    data = pd.read_csv(args.csv, header=None)
-    print(f"Loaded {data.shape[0]} rows and {data.shape[1]} columns")
-    X = data[data.columns[:-1]].values.astype(np.float32)
-    y = pd.factorize(data[data.columns[-1]])[0].astype(np.uint8)
-
-    print("Fitting...")
-    model.fit(X, y)
-    print("Done")
-    print("Predicting...")
-    y_pred = model.predict(X)
-    print("Done")
-    accuracy = np.sum(y_pred == y) / len(y)
-    print(f"Train accuracy: {accuracy * 100 :.2f}%")
-    print("*" * 20)
+    np.random.seed(42)
+    counter = 0
+    for i in range(40):
+        model = KnnClassifier(k=args.k, p=args.p)
+        data = pd.read_csv(args.csv, header=None)
+        X = data[data.columns[:-1]].values.astype(np.float32)
+        y = pd.factorize(data[data.columns[-1]])[0].astype(np.uint8)
+        indecies = np.arange(150)
+        np.random.shuffle(indecies)
+        indecies_train = indecies[:100]
+        indecies_test = indecies[100:150]
+        X1 = X[indecies_train]
+        y1 = y[indecies_train]
+        X2 = X[indecies_test]
+        y2 = y[indecies_test]
+        model.fit(X1, y1)
+        y_pred = model.predict(X2)
+        accuracy = np.sum(y_pred == y2) / len(y2)
+        print(f"Our Train accuracy: {accuracy * 100 :.2f}%")
+        classifier = KNeighborsClassifier(4, p=2)
+        classifier.fit(X1, y1)
+        y_pred = classifier.predict(X2)
+        accuracy1 = np.sum(y_pred == y2) / len(y2)
+        print(f"Sklearn Train accuracy: {accuracy1 * 100 :.2f}%")
+        print("*" * 20)
+        if accuracy1 != accuracy:
+            counter += 1
+    print("Number of missmatched accuracies:", counter)
 
 
 if __name__ == "__main__":
