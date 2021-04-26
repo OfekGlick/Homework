@@ -7,7 +7,7 @@ class testing(MRJob):
     def my_mapper(self, _, row: str):
         row = {x.split(":")[0].strip(r"\""): x.split(":")[1].strip("\"") for x in row[1:len(row)].split(',')}
         date = datetime.fromtimestamp(int(row['Timestamp'][:-1]))
-        yield (row['JourneyId'], date.strftime("%m/%d/%Y")), date.time().strftime("%H:%M:%S")
+        yield (row['JourneyId'], date.strftime("%Y/%m/%d")), date.time().strftime("%H:%M:%S")
 
     def my_reducer(self, key, value):
         value = list(map(lambda x: datetime.strptime(x, "%H:%M:%S"), value))
