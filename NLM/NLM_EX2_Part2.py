@@ -1,6 +1,23 @@
-from ex1 import generic_gs
 from matplotlib import pyplot as plt
 import numpy as np
+
+
+def generic_gs(f, l, u, eps, k):
+    fv = []
+    x2 = l + T * (u - l)
+    x3 = l + (1 - T) * (u - l)
+    while abs(u - l) >= eps and k >= 0:
+        if f(x2) < f(x3):
+            u = x3
+            x3 = x2
+            x2 = l + T * (u - l)
+        else:
+            l = x2
+            x2 = x3
+            x3 = l + (1 - T) * (u - l)
+        k -= 1
+        fv.append(f((u + l) / 2))
+    return (l + u) / 2, fv
 
 
 def gs_denoise_step(mu, a, b, c):
