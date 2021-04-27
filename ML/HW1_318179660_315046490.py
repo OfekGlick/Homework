@@ -35,12 +35,26 @@ class KnnClassifier:
         self.train_label = y
 
     def _tie_break(self, winning_labels, distances, labels):
+        """
+
+        :param winning_labels: ndarray of the labels with the highest appearances
+        :param distances: all k neighbors distances
+        :param labels: all k neighbors distances
+        :return: Winning label
+        """
+        # Indices of winning labels
         indecies = np.isin(labels, winning_labels)
+        # Their distances
         distances = distances[indecies]
+        # Saving the minimal value
         min_distance = min(distances)
+        # Filtering the closest winning labels
         closest_winners = np.where(distances == min_distance)
+        # Save only the closest
         closest_winners_label = labels[closest_winners]
+        # Sort them lexicographically
         closest_winners_label_sorted = sorted(closest_winners_label)
+        # Return the winning label
         return closest_winners_label_sorted[0]
 
     def _single_predict(self, sample):
@@ -57,19 +71,26 @@ class KnnClassifier:
         helper_mat = np.ones(train_set.shape) * sample
         # Calculate the distance for each point in the training set using single_dist
         dist = np.fromiter(map(single_dist, zip(helper_mat, train_set)), dtype=np.float64)
+        bla = np.argsort(dist)
+        # Sort the distances and labels first by distance then by lexicographic order
         dist_and_label = np.array(
             sorted(sorted(list(zip(dist, self.train_label)), key=lambda x: x[1]), key=lambda x: x[0])[
             :self.k])
+        # Count appearances of each label's
         from collections import Counter
         distances, labels = list(zip(*dist_and_label))
         counter = dict(Counter(labels)).items()
         distances = np.array(distances)
         labels = np.array(labels)
+        # Find out who has the maximum appearances
         max_label_appearance = max(counter, key=lambda x: x[1])[1]
         counter = np.array(list(counter))
+        # Save only the labels with the highest appearance
         counter = counter[np.where(counter[:, 1] == max_label_appearance)]
+        # If there are more than 1, break the tie
         if len(counter) >= 2:
             return self._tie_break(counter.T[0], distances, labels)
+        # Otherwise return the dominant label
         chosen_label = counter[0][0]
         return chosen_label
 
@@ -88,6 +109,7 @@ class KnnClassifier:
 
 
 def main():
+    from sklearn.neighbors import KNeighborsClassifier
     print("*" * 20)
     print("Started HW1_ID1_ID2.py")
     # Parsing script arguments
@@ -118,7 +140,7 @@ def main():
         y_pred = model.predict(X2)
         accuracy = np.sum(y_pred == y2) / len(y2)
         print(f"Our Train accuracy: {accuracy * 100 :.2f}%")
-        classifier = KNeighborsClassifier(4, p=2)
+        classifier = KNeighborsClassifier(args.k, p=args.p)
         classifier.fit(X1, y1)
         y_pred = classifier.predict(X2)
         accuracy1 = np.sum(y_pred == y2) / len(y2)
