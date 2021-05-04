@@ -124,6 +124,8 @@ def main():
     np.random.seed(42)
     counter = 0
     for i in range(40):
+        if i == 4:
+            ofek = 5
         model = KnnClassifier(k=args.k, p=args.p)
         data = pd.read_csv(args.csv, header=None)
         X = data[data.columns[:-1]].values.astype(np.float32)
