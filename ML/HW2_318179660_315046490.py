@@ -27,14 +27,16 @@ class PerceptronClassifier:
         :param y: A 1-dimensional numpy array of m rows. it is guaranteed to match X's rows in length (|m_x| == |m_y|).
         Array datatype is guaranteed to be np.uint8.
         """
-        self.train_set = X
+        m, n = X.shape
+        bias = np.ones((m, n + 1))
+        bias[0:, 1:] = X
+        self.train_set = bias
         self.train_label = y
         self.k = len(self.train_label[np.unique(self.train_label)])
-        m, n = X.shape
-        seps = np.zeros((self.k, n))
+        seps = np.zeros((self.k, n + 1))
         while True:
             prev = seps.copy()
-            for x, y_t in zip(X, y):
+            for x, y_t in zip(self.train_set, self.train_label):
                 temp = np.array([w_t.dot(x) for w_t in seps])
                 y_t_hat = np.argmax(temp)
                 if y_t_hat != y_t:
@@ -53,7 +55,10 @@ class PerceptronClassifier:
         Array datatype is guaranteed to be np.float32.
         :return: A 1-dimensional numpy array of m rows. Should be of datatype np.uint8.
         """
-        return np.array([np.argmax(np.array([w_i.dot(x) for w_i in self.w])) for x in X])
+        m, n = X.shape
+        test_set = np.ones((m, n + 1))
+        test_set[0:, 1:] = X
+        return np.array([np.argmax(np.array([w_i.dot(x) for w_i in self.w])) for x in test_set])
 
 
 if __name__ == "__main__":
