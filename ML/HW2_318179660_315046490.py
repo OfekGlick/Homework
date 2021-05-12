@@ -93,6 +93,9 @@ if __name__ == "__main__":
         y2 = y[indecies_test]
         is_separable = model.fit(X1, y1)
         y_pred = model.predict(X2)
-        accuracy = np.sum(y_pred == y2.ravel()) / y.shape[0]
+        print(y_pred)
+        print(y2.ravel())
+        print()
+        accuracy = np.sum(y_pred == y2.ravel()) / y_pred.shape[0]
         acc_list.append(accuracy)
     print(acc_list)

@@ -30,24 +30,41 @@ def wrapper(cents):
 
 
 def kmeans_fit(data: pyspark.sql.dataframe.DataFrame, k, max_iter, q, init):
-    # while max_iter >= 0:
-    #     max_iter -= max_iter
-    calc = wrapper(init)
-    data = data.rdd.map(lambda row: (row[0], row[1], row[2], *calc(row))).sortBy(lambda x: x[3]).sortBy(
-        lambda x: x[4])
-    new_rdd = []
-    new_cents = []
-    for i in range(k):
-        new_rdd.append(data.filter(lambda x: x[4] == i).map(lambda row: np.array((row[0], row[1], row[2]))))
-        new_cents.append(new_rdd[i].mean())
-    print(new_cents)
+    from time import time
+    temp = []
+    sstart = time()
+    while max_iter >= 0:
+        start = time()
+        print(max_iter)
+        calc = wrapper(init)
+        init = np.array(init)
+        data_k = data.rdd.map(lambda row: (row[0], row[1], row[2], *calc(row))).sortBy(lambda x: x[3]).sortBy(
+            lambda x: x[4])
+        new_rdd = []
+        new_cents = []
+        for i in range(k):
+            new_rdd.append(data_k.filter(lambda x: x[4] == i).map(
+                lambda row: np.array((row[0], row[1], row[2]))).zipWithIndex().filter(lambda x: x[1] != q).map(
+                lambda x: x[0]))
+            new_cents.append(new_rdd[i].mean())
+        new_cents = np.stack(new_cents, axis=0)
+        temp.append(new_cents)
+        comparison = (new_cents == init).all()
+        if comparison:
+            print("Done")
+            break
+        init = new_cents
+        max_iter -= 1
+        print(time() - start)
+    print("total time", time() - sstart)
+    print(temp)
 
 
 if __name__ == '__main__':
     spark, sc = init_spark('hw2')
     data = spark.read.parquet(r"random_data.parquet")
-    k = 10
-    max_iter = 100
+    k = 5
+    max_iter = 30
     q = 10
     init = data.take(k)
     res = kmeans_fit(data, k, max_iter, q, init)
