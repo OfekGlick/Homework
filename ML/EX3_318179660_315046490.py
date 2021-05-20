@@ -3,11 +3,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
 
-
 def cross_validation_error(X, y, model, folds):
     n_sample = len(y)
     indecies = np.arange(n_sample)
-    np.random.shuffle(indecies)
     fold_sizes = np.full(folds, n_sample // folds, dtype=int)
     fold_sizes[:n_sample % folds] += 1
     current = 0
@@ -17,7 +15,7 @@ def cross_validation_error(X, y, model, folds):
         start, stop = current, current + fold_size
         test_indecies = indecies[start:stop]
         test_mask = np.zeros(n_sample)
-        test_mask[test_indecies] = True
+        test_mask[test_indecies] = 1
         train_indecies = indecies[np.logical_not(test_mask)]
 
         X_train = X[train_indecies]
@@ -85,3 +83,4 @@ if __name__ == '__main__':
     ax.legend()
     fig.tight_layout()
     plt.show()
+    print(res)
