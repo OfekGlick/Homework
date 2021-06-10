@@ -16,22 +16,36 @@ def init_spark(app_name: str):
     return spark, sc
 
 
-def wrapper(cents):
-    def cal_dist(point):
-        point = list(point)
-        dist = []
-        for cent in cents:
-            dist.append(sum([(xi - yi) ** 2 for xi, yi in zip(point, cent)]) ** 0.5)
-        import numpy as np
-        temp = np.array(dist)
-        dist = min(temp)
-        classification = np.argmin(temp)
-        return float(dist), float(classification)
-
-    return cal_dist
+# def wrapper(cents):
+#     def cal_dist(point):
+#         point = list(point)
+#         dist = []
+#         for cent in cents:
+#             dist.append(sum([(xi - yi) ** 2 for xi, yi in zip(point, cent)]) ** 0.5)
+#         import numpy as np
+#         temp = np.array(dist)
+#         dist = min(temp)
+#         classification = np.argmin(temp)
+#         return float(dist), float(classification)
+#
+#     return cal_dist
 
 
 def kmeans_fit(data: pyspark.sql.dataframe.DataFrame, k, max_iter, q, init):
+    def wrapper(cents):
+        def cal_dist(point):
+            point = list(point)
+            dist = []
+            for cent in cents:
+                dist.append(sum([(xi - yi) ** 2 for xi, yi in zip(point, cent)]) ** 0.5)
+            import numpy as np
+            temp = np.array(dist)
+            dist = min(temp)
+            classification = np.argmin(temp)
+            return float(dist), float(classification)
+
+        return cal_dist
+
     temp = []
     while max_iter > 0:
         from time import time
@@ -44,12 +58,10 @@ def kmeans_fit(data: pyspark.sql.dataframe.DataFrame, k, max_iter, q, init):
         new_cents = []
         for i in range(k):
             new_rdd.append(data_k.filter(lambda x: x[-1] == i).map(
-                lambda row: np.array(row)[:-2]).zipWithIndex().filter(lambda x: x[1] % q != 0).map(
+                lambda row: np.array(row)[:-2]).zipWithIndex().filter(lambda x: (x[1] + 1) % q != 0).map(
                 lambda x: x[0]))
             new_cents.append(new_rdd[i].mean())
         new_cents = np.stack(new_cents, axis=0)
-        print("time:", time() - start)
-        print(new_cents)
         temp.append(new_cents)
         if (new_cents == init).all():
             break
@@ -63,7 +75,7 @@ if __name__ == '__main__':
     spark, sc = init_spark('hw2')
     data = spark.read.parquet(r"random_data.parquet")
     k = 3
-    max_iter = 3
+    max_iter = 4
     q = 5
     init = data.take(k)
     res = kmeans_fit(data, k, max_iter, q, init)
