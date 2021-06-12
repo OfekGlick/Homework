@@ -91,8 +91,10 @@ def lock_management(cursor, transactionID, productID, action, lock_type):
                 return True
         give_lock = f"""insert into Locks (transactionID, productID, lockType) values
                         (?,?,?)"""
+        give_lock_log = f"""insert into Locks (transactionID, productID, lockType) values
+                        ({transactionID},{productID},{lock_type})"""
         if len(other_locks) == 0:
-            update_log(cursor, transactionID, 'Locks', productID, 'insert', give_lock)
+            update_log(cursor, transactionID, 'Locks', productID, 'insert', give_lock_log)
             cursor.execute(give_lock, (transactionID, productID, lock_type))
             cursor.commit()
             return True
@@ -104,7 +106,7 @@ def lock_management(cursor, transactionID, productID, action, lock_type):
                 if 'write' in other_locks:
                     return False
                 else:
-                    update_log(cursor, transactionID, 'Locks', productID, 'insert', give_lock)
+                    update_log(cursor, transactionID, 'Locks', productID, 'insert', give_lock_log)
                     cursor.execute(give_lock, (transactionID, productID, lock_type))
                     cursor.commit()
                     return True
@@ -165,11 +167,14 @@ def execute_query_on_site(cursor, transactionID, order):
 
         for needed, in_stock in zip([x[1] for x in order], inventory):
             if in_stock - needed < 0:
-                return False
+                raise Exception  # create my own exception
 
         for productID, _ in order:
             lock_management(cursor, transactionID, productID, 'release', 'read')
-            lock_management(cursor, transactionID, productID, 'acquire', 'write')
+            if lock_management(cursor, transactionID, productID, 'acquire', 'write'):
+                continue
+            else:
+                return False
 
         for (productID, amount), in_stock in zip(order, inventory):
             query = f"update ProductsInventory set inventory = {in_stock - amount} where productID = {productID}"
@@ -190,7 +195,7 @@ def manage_transactions(T):
     bigserver_cursor.execute("select * from categoriestosites")
     data = bigserver_cursor.fetchall()
     path = r"C:\Users\Ofek\PycharmProjects\GitRepo\DDBS\orders"
-    for order in os.listdir(path):
+    for order in sorted(os.listdir(path)):
         with open(pth.join(path, order), encoding='utf-8-sig') as curr_order:
             transactionID = order + "_" + str(X)
             order = divide_to_sites(list(csv.reader(curr_order)))
@@ -222,5 +227,3 @@ if __name__ == '__main__':
     # lock_management(cur, 'ofek', 5, 'release', 'write')
     # lock_management(cur, 'roni', 5, 'acquire', 'write')
     # print(cur.execute("select * from locks").fetchall())
-
-
