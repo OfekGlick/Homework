@@ -21,6 +21,7 @@ def flatten_json(jsonfile):
 
 
 def json_to_TSV(jsonfile, headers):
+    # ofek?
     with open('converted.tsv', 'w') as bla:
         filewriter = csv.writer(bla, delimiter="\t")
         filewriter.writerow(headers)
