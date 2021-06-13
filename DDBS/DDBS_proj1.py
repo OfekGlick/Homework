@@ -1,8 +1,9 @@
+import multiprocessing
 import os
 import csv
 import pyodbc
 from os import path as pth
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 from collections import deque
 import time
 
@@ -158,9 +159,7 @@ def update_inventory(cursor, transactionID):
 #     RELEASE WRITE LOCK!!!!!!!!!!!!!!!!!!!
 
 
-
-
-def execute_query_on_site(cursor, transactionID, order, step=1):
+def execute_query_on_site(cursor, transactionID, order, return_dict, inventory, step, q: Queue):
     if step == PREFORM_STEP_ONE:
         can_continue = all(
             [lock_management(cursor, transactionID, productID, 'acquire', 'read') for productID, _ in order])
@@ -174,53 +173,88 @@ def execute_query_on_site(cursor, transactionID, order, step=1):
 
             for needed, in_stock in zip([x[1] for x in order], inventory):
                 if in_stock - int(needed) < 0:
-                    raise InventoryError
+                    q.put((None, -2, []))
+                    return
             step = PREFORM_STEP_TWO
         else:
-            return None, PREFORM_STEP_ONE
+            q.put((None, PREFORM_STEP_ONE, inventory))
     if step == PREFORM_STEP_TWO:
         for productID, _ in order:
             lock_management(cursor, transactionID, productID, 'release', 'read')
             if lock_management(cursor, transactionID, productID, 'acquire', 'write'):
                 continue
             else:
-                return None, PREFORM_STEP_TWO
+                q.put((None, PREFORM_STEP_TWO, inventory))
         step = PREFORM_STEP_THREE
     if step == PREFORM_STEP_THREE:
         for (productID, amount), in_stock in zip(order, inventory):
-            query = f"update ProductsInventory set inventory = {int(in_stock) - int(amount)} where productID = {productID}"
+            query = f"update ProductsInventory set inventory = {int(in_stock) - int(amount)} where productID = " \
+                    f"{productID}"
             update_log(cursor, transactionID, 'ProductsInventory', productID, 'update', query, False)
             cursor.execute(query)
-        return cursor, -1
+        prodIDlst = list(zip(list(zip(*order))[0], inventory))
+        q.put((cursor, -1, prodIDlst))
 
 
-def manage_transaction(transactionID, order, data):
+def update_productOrder(cursor, transactionID, site_order):
+    sqlquery = """insert into ProductsOrdered(transactionID, productID, amount) values
+                    (?,?,?)"""
+    sqlquerylog = """insert into ProductsOrdered(transactionID, productID, amount) values
+                        ('{0}',{1},{2})"""
+    for productID, amount in site_order:
+        update_log(cursor, transactionID, 'ProductsOrdered', productID, 'insert',
+                   sqlquerylog.format(transactionID, productID, amount))
+        cursor.execute(sqlquery, (transactionID, productID, amount))
+    cursor.commit()
+
+
+def manage_transaction(transactionID, order, data, return_dict):
     relevant = deque([(site, uid, 1) for site, uid in data if str(site) in order.keys()])
     cursor_lst = []
+    inventory = dict()
+    flag = True
     while len(relevant) > 0:
         order_queue = list(relevant)
         for (site, uid, step) in order_queue:
             site_cur = DBconnect(uid)
             site_order = order[str(site)]
-            try:
-                cursor, status = execute_query_on_site(site_cur, transactionID, site_order, step)
-                if status != -1:
-                    relevant.popleft()
-                    relevant.append((site, uid, status))
-                else:
-                    relevant.popleft()
-                    cursor_lst.append((cursor, site_order))
-            except InventoryError:
-                return None
+            results = Queue()
+            site_execute = Process(target=execute_query_on_site, args=(
+                site_cur, transactionID, site_order, return_dict, inventory[site], step, results))
+            site_execute.start()
+            site_execute.join()
+            res = results.get()
+            cursor, step, inventory = res[0], res[1], res[2]
+            if step == -2:
+                return_dict[-1] = False
+                return
+            inventory[site] = inventory
+            if step != -1:
+                relevant.popleft()
+                relevant.append((site, uid, step))
+            else:
+                relevant.popleft()
+                cursor_lst.append((cursor, site, site_order))
+        if not flag:
+            break
+    return_dict[-1] = True
 
-    for cursor, site_order in cursor_lst:
-        [lock_management(cursor, transactionID, productID, 'release', 'write') for productID, _ in site_order]
+    for cursor, site, site_order in cursor_lst:
+        return_dict[site] = (cursor, inventory[site])
+        cursor.commit()
+
+    # for cursor, _, site_order in cursor_lst:
+    #     [lock_management(cursor, transactionID, productID, 'release', 'write') for productID, _ in site_order]
 
 
-#   UPDATE PRODUCTS_ORDERED
-
-
-# This needs to happen after all sites have finished
+# def undo(transactionID, to_undo: dict):
+#     if len(to_undo.keys()) == 0:
+#
+#     for site in to_undo.keys():
+#         site_cur = to_undo[site][0]
+#         for productID in to_undo[site][1]:
+#             lock_management(site_cur, transactionID, productID, 'acquire', 'write')
+#     pass
 
 
 def divide_to_sites(order):
@@ -236,6 +270,8 @@ def manage_transactions(T):
     data = bigserver_cursor.fetchall()
     path = r"C:\Users\Ofek\PycharmProjects\GitRepo\DDBS\orders"
     for order in sorted(os.listdir(path)):
+        manager = multiprocessing.Manager()
+        return_dict = manager.dict()
         with open(pth.join(path, order), encoding='utf-8-sig') as curr_order:
             transactionID = order[:-4] + "_" + str(X)
             order = divide_to_sites(list(csv.reader(curr_order)))
@@ -245,10 +281,13 @@ def manage_transactions(T):
             if transaction_proc.is_alive():
                 print(transactionID + "failed")
                 transaction_proc.terminate()
+                # undo(transactionID, return_dict)
             else:
-                print("transaction finished")
-
-#                 preform Undo on TransactionID
+                if return_dict[-1]:
+                    print(transactionID + "passed")
+                else:
+                    print(transactionID + "failed")
+#                   Release locks
 
 
 if __name__ == '__main__':
