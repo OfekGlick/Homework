@@ -5,7 +5,9 @@ import pyodbc
 from os import path as pth
 from multiprocessing import Process, Queue
 from collections import deque
-import time
+from time import time
+from tqdm import tqdm
+
 
 X = 29
 X_yoni_yosi_eyal = 32
@@ -97,7 +99,6 @@ def lock_management(cursor, transactionID, productID, action, lock_type):
         my_locks = [(tran, prod, typ) for tran, prod, typ in locks if tran == transactionID]
         for lock in my_locks:
             if lock[0] == transactionID and lock[1] == productID and lock[2] == lock_type:
-                print("no lock needed")
                 return True
         give_lock = f"""insert into Locks (transactionID, productID, lockType) values
                         (?,?,?)"""
@@ -134,32 +135,42 @@ def lock_management(cursor, transactionID, productID, action, lock_type):
             cursor.commit()
 
 
-def update_inventory(cursor, transactionID):
-    get_inv = "select * from ProductsInventory"
-    #     REQUEST READ LOCK!!!!!!!!!!!!!!!!!!!
-    cursor.execute(get_inv)
-    #     RELEASE READ LOCK!!!!!!!!!!!!!!!!!!!
-    data = cursor.fetchall()
+def update_inventory(transactionID):
+    cursor = DBconnect("ofek0glick")
     inven = [60 if i == 1 else 53 for i in range(1, Y + 1)]
-    #     REQUEST WRITE LOCK!!!!!!!!!!!!!!!!!!!
-    if len(data) == 0:
+    try:
+        can_update = all(
+            [lock_management(cursor, transactionID, productID + 1, 'acquire', 'write') for productID, amount in
+             enumerate(inven)])
+        from time import time
+        start = time()
+        print("trying to restock")
+        while not can_update:
+            if time() - start >= 120:
+                break
+            can_update = all(
+                [lock_management(cursor, transactionID, productID + 1, 'acquire', 'write') for productID, amount in
+                 enumerate(inven)])
+        if can_update:
+            query = """update ProductsInventory 
+                        set inventory = {0}
+                        where productID = {1}"""
+            for i, amount in enumerate(inven):
+                update_log(cursor, transactionID, 'ProductsInventory', i + 1, 'update', query.format(amount, i + 1),
+                           False)
+                cursor.execute(query.format(amount, i + 1))
+            cursor.commit()
+        else:
+            return
+    except pyodbc.IntegrityError:
         for i, amount in enumerate(inven):
             query = f"""insert into ProductsInventory (productID, inventory) values
                         ({i + 1},{amount})"""
-            cursor.execute(query)
-    else:
-        for i, amount in enumerate(inven):
-            query = f"""update ProductsInventory 
-                        set inventory = {amount}
-                        where productID = {i + 1}"""
-            cursor.execute(query)
-    cursor.commit()
+            cursor.execute(query).commit()
+            update_log(cursor, transactionID, 'ProductsInventory', i + 1, 'insert', query)
 
 
-#     RELEASE WRITE LOCK!!!!!!!!!!!!!!!!!!!
-
-
-def execute_query_on_site(cursor, transactionID, order, return_dict, inventory, step, q: Queue):
+def execute_query_on_site(cursor, transactionID, order, inventory, step):
     if step == PREFORM_STEP_ONE:
         can_continue = all(
             [lock_management(cursor, transactionID, productID, 'acquire', 'read') for productID, _ in order])
@@ -173,18 +184,17 @@ def execute_query_on_site(cursor, transactionID, order, return_dict, inventory, 
 
             for needed, in_stock in zip([x[1] for x in order], inventory):
                 if in_stock - int(needed) < 0:
-                    q.put((None, -2, []))
-                    return
+                    return None, -2, []
             step = PREFORM_STEP_TWO
         else:
-            q.put((None, PREFORM_STEP_ONE, inventory))
+            return None, PREFORM_STEP_ONE, inventory
     if step == PREFORM_STEP_TWO:
         for productID, _ in order:
             lock_management(cursor, transactionID, productID, 'release', 'read')
             if lock_management(cursor, transactionID, productID, 'acquire', 'write'):
                 continue
             else:
-                q.put((None, PREFORM_STEP_TWO, inventory))
+                return None, PREFORM_STEP_TWO, inventory
         step = PREFORM_STEP_THREE
     if step == PREFORM_STEP_THREE:
         for (productID, amount), in_stock in zip(order, inventory):
@@ -192,8 +202,8 @@ def execute_query_on_site(cursor, transactionID, order, return_dict, inventory, 
                     f"{productID}"
             update_log(cursor, transactionID, 'ProductsInventory', productID, 'update', query, False)
             cursor.execute(query)
-        prodIDlst = list(zip(list(zip(*order))[0], inventory))
-        q.put((cursor, -1, prodIDlst))
+        prod_id_lst = list(zip(list(zip(*order))[0], inventory))
+        return cursor, -1, prod_id_lst
 
 
 def update_productOrder(cursor, transactionID, site_order):
@@ -203,32 +213,26 @@ def update_productOrder(cursor, transactionID, site_order):
                         ('{0}',{1},{2})"""
     for productID, amount in site_order:
         update_log(cursor, transactionID, 'ProductsOrdered', productID, 'insert',
-                   sqlquerylog.format(transactionID, productID, amount))
+                   sqlquerylog.format(transactionID, productID, amount), False)
         cursor.execute(sqlquery, (transactionID, productID, amount))
-    cursor.commit()
 
 
 def manage_transaction(transactionID, order, data, return_dict):
     relevant = deque([(site, uid, 1) for site, uid in data if str(site) in order.keys()])
     cursor_lst = []
-    inventory = dict()
+    inventory = {site: [] for site in order.keys()}
     flag = True
     while len(relevant) > 0:
         order_queue = list(relevant)
         for (site, uid, step) in order_queue:
             site_cur = DBconnect(uid)
             site_order = order[str(site)]
-            results = Queue()
-            site_execute = Process(target=execute_query_on_site, args=(
-                site_cur, transactionID, site_order, return_dict, inventory[site], step, results))
-            site_execute.start()
-            site_execute.join()
-            res = results.get()
-            cursor, step, inventory = res[0], res[1], res[2]
+            cursor, step, site_inventory = execute_query_on_site(
+                site_cur, transactionID, site_order, inventory[str(site)], step)
             if step == -2:
                 return_dict[-1] = False
                 return
-            inventory[site] = inventory
+            inventory[str(site)] = site_inventory
             if step != -1:
                 relevant.popleft()
                 relevant.append((site, uid, step))
@@ -237,27 +241,70 @@ def manage_transaction(transactionID, order, data, return_dict):
                 cursor_lst.append((cursor, site, site_order))
         if not flag:
             break
-    return_dict[-1] = True
+
+    return_dict["inventory"] = inventory
+
+    return_dict[0] = False
 
     for cursor, site, site_order in cursor_lst:
-        return_dict[site] = (cursor, inventory[site])
+        update_productOrder(cursor, transactionID, site_order)
+
+    for cursor, _, _ in cursor_lst:
         cursor.commit()
 
-    # for cursor, _, site_order in cursor_lst:
-    #     [lock_management(cursor, transactionID, productID, 'release', 'write') for productID, _ in site_order]
+    return_dict[1] = False
+
+    for cursor, _, site_order in cursor_lst:
+        [lock_management(cursor, transactionID, productID, 'release', 'write') for productID, _ in site_order]
+
+    return_dict[2] = False
 
 
-# def undo(transactionID, to_undo: dict):
-#     if len(to_undo.keys()) == 0:
-#
-#     for site in to_undo.keys():
-#         site_cur = to_undo[site][0]
-#         for productID in to_undo[site][1]:
-#             lock_management(site_cur, transactionID, productID, 'acquire', 'write')
-#     pass
+def undo(transactionID, prev_inventory: dict, order_data, site_to_uid):
+    print("preforming Undo")
+    site_cursors = {str(site): DBconnect(uid) for site, uid in site_to_uid if str(site) in order_data.keys()}
+    find_locks = """select productID from  locks where transactionID = ?"""
+    find_locks_log = """select productID from  locks where transactionID = '{0}'"""
+    release_lock = """DELETE FROM Locks WHERE transactionID = ?"""
+    release_lock_log = """DELETE FROM Locks WHERE transactionID='{0}'"""
+    delete_inventory = """DELETE FROM ProductsOrdered WHERE transactionID = ?"""
+    delete_inventory_log = """DELETE FROM ProductsOrdered WHERE transactionID = '{0}'"""
+    correct_inventory = """update ProductsInventory set inventory = ? where productID = ?"""
+    correct_inventory_log = """update ProductsInventory set inventory = {0} where productID = {1}"""
+    if len(prev_inventory.keys()) == 0:
+        for site in order_data.keys():
+            site_cur = site_cursors[site]
+            result = site_cur.execute(find_locks, transactionID).fetchall()
+            for productID in result:
+                update_log(site_cur, transactionID, 'Locks', productID[0], 'read', find_locks_log.format(transactionID))
+            for productID in result:
+                update_log(site_cur, transactionID, 'Locks', productID[0], 'delete',
+                           release_lock_log.format(transactionID, productID[0]))
+            site_cur.execute(release_lock, transactionID)
+            site_cur.commit()
+    else:
+        for site in prev_inventory.keys():
+            site_cur = site_cursors[site]
+            # reset inventory
+            for productID, amount in prev_inventory[site]:
+                update_log(site_cur, transactionID, 'ProductsInventory', productID, 'update',
+                           correct_inventory_log.format(transactionID, productID))
+                site_cur.execute(correct_inventory, amount, productID)
+            # delete product ordered
+            for productID, _ in prev_inventory[site]:
+                update_log(site_cur, transactionID, 'ProductsOrdered', productID, 'delete',
+                           delete_inventory_log.format(transactionID))
+            site_cur.execute(delete_inventory, transactionID)
+            # release locks
+            for productID, _ in prev_inventory[site]:
+                update_log(site_cur, transactionID, 'Locks', productID, 'delete',
+                           release_lock_log.format(transactionID))
+                site_cur.execute(release_lock, transactionID)
+                site_cur.commit()
 
 
 def divide_to_sites(order):
+    order = order[1:]
     new_order = {key: [] for key, _, _ in order}
     for req in order:
         new_order[req[0]].append((req[1], req[2]))
@@ -269,30 +316,58 @@ def manage_transactions(T):
     bigserver_cursor.execute("select * from categoriestosites")
     data = bigserver_cursor.fetchall()
     path = r"C:\Users\Ofek\PycharmProjects\GitRepo\DDBS\orders"
+    manager = multiprocessing.Manager()
+    return_dict = manager.dict()
+    successful_transactions = []
+    failed_transactions = []
     for order in sorted(os.listdir(path)):
-        manager = multiprocessing.Manager()
-        return_dict = manager.dict()
         with open(pth.join(path, order), encoding='utf-8-sig') as curr_order:
             transactionID = order[:-4] + "_" + str(X)
-            order = divide_to_sites(list(csv.reader(curr_order)))
-            transaction_proc = Process(target=manage_transaction, args=(transactionID, order, data))
+            print(transactionID)
+            order_data = divide_to_sites(list(csv.reader(curr_order)))
+            return_dict[-1], return_dict[0], return_dict[1], return_dict[2] = True, True, True, True
+            transaction_proc = Process(target=manage_transaction, args=(transactionID, order_data, data, return_dict))
             transaction_proc.start()
             transaction_proc.join(timeout=T)
             if transaction_proc.is_alive():
-                print(transactionID + "failed")
                 transaction_proc.terminate()
-                # undo(transactionID, return_dict)
+                if return_dict[0]:
+                    undo(transactionID, {}, order_data, data)
+                    failed_transactions.append(transactionID)
+                    print(transactionID + " timed out")
+                elif not return_dict[0] and return_dict[1]:
+                    undo(transactionID, return_dict["inventory"], order_data, data)
+                    failed_transactions.append(transactionID)
+                    print(transactionID + " timed out")
+                elif not return_dict[1] and return_dict[2]:
+                    site_cursors = {str(site): DBconnect(uid) for site, uid in data if
+                                    str(site) in order_data.keys()}
+                    for site in order_data.keys():
+                        sit_cur = site_cursors[site]
+                        for productID, _ in order_data[site]:
+                            lock_management(sit_cur, transactionID, productID, 'release', 'write')
+                        successful_transactions.append(transactionID)
+                    print(transactionID + " timed out but passed")
+
             else:
                 if return_dict[-1]:
-                    print(transactionID + "passed")
+                    successful_transactions.append(transactionID)
+                    print(transactionID + " passed")
+
                 else:
-                    print(transactionID + "failed")
-#                   Release locks
+                    undo(transactionID, {}, order_data, data)
+                    failed_transactions.append(transactionID)
+                    print(transactionID + " failed")
+        return_dict.clear()
 
 
 if __name__ == '__main__':
     cur = DBconnect("ofek0glick")
     drop_tables(cur)
     create_tables(cur)
-    update_inventory(cur, "bla")
-    manage_transactions(35)
+    update_inventory("Updating Inventory")
+    print("Stocked up")
+    manage_transactions(25)
+    update_inventory("Updating Inventory")
+
+
