@@ -8,7 +8,6 @@ from collections import deque
 from time import time
 from tqdm import tqdm
 
-
 X = 29
 X_yoni_yosi_eyal = 32
 Y = 11
@@ -16,11 +15,6 @@ Z = 59
 PREFORM_STEP_ONE = 1
 PREFORM_STEP_TWO = 2
 PREFORM_STEP_THREE = 3
-
-
-class InventoryError(Exception):
-    """Error if there are not enough items in the inventory"""
-    pass
 
 
 def DBconnect(username):
@@ -98,17 +92,20 @@ def lock_management(cursor, transactionID, productID, action, lock_type):
         other_locks = [(tran, prod, typ) for tran, prod, typ in locks if tran != transactionID]
         my_locks = [(tran, prod, typ) for tran, prod, typ in locks if tran == transactionID]
         for lock in my_locks:
-            if lock[0] == transactionID and lock[1] == productID and lock[2] == lock_type:
+            if lock[0] == transactionID and str(lock[1]) == str(productID) and lock[2] == lock_type:
                 return True
         give_lock = f"""insert into Locks (transactionID, productID, lockType) values
                         (?,?,?)"""
         give_lock_log = f"""insert into Locks (transactionID, productID, lockType) values
                         ({transactionID},{productID},{lock_type})"""
         if len(other_locks) == 0:
-            update_log(cursor, transactionID, 'Locks', productID, 'insert', give_lock_log)
-            cursor.execute(give_lock, (transactionID, productID, lock_type))
-            cursor.commit()
-            return True
+            try:
+                update_log(cursor, transactionID, 'Locks', productID, 'insert', give_lock_log, False)
+                cursor.execute(give_lock, (transactionID, productID, lock_type))
+                cursor.commit()
+                return True
+            except pyodbc.IntegrityError:
+                return False
         else:
             if lock_type == 'write':
                 return False
@@ -117,10 +114,13 @@ def lock_management(cursor, transactionID, productID, action, lock_type):
                 if 'write' in other_locks:
                     return False
                 else:
-                    update_log(cursor, transactionID, 'Locks', productID, 'insert', give_lock_log)
-                    cursor.execute(give_lock, (transactionID, productID, lock_type))
-                    cursor.commit()
-                    return True
+                    try:
+                        update_log(cursor, transactionID, 'Locks', productID, 'insert', give_lock_log, False)
+                        cursor.execute(give_lock, (transactionID, productID, lock_type))
+                        cursor.commit()
+                        return True
+                    except pyodbc.IntegrityError:
+                        return False
     else:
         check = f"""SELECT * FROM Locks WHERE transactionID='{transactionID}'
                                                 and productID={productID}
@@ -130,7 +130,7 @@ def lock_management(cursor, transactionID, productID, action, lock_type):
             release_lock = f"""DELETE FROM Locks WHERE transactionID='{transactionID}'
                                                     and productID={productID}
                                                     and lockType='{lock_type}'"""
-            update_log(cursor, transactionID, 'Locks', productID, 'delete', release_lock)
+            update_log(cursor, transactionID, 'Locks', productID, 'delete', release_lock, False)
             cursor.execute(release_lock)
             cursor.commit()
 
@@ -168,6 +168,8 @@ def update_inventory(transactionID):
                         ({i + 1},{amount})"""
             cursor.execute(query).commit()
             update_log(cursor, transactionID, 'ProductsInventory', i + 1, 'insert', query)
+    [lock_management(cursor, transactionID, i, 'release', 'write') for i in range(1, 12)]
+    print("Stocked up")
 
 
 def execute_query_on_site(cursor, transactionID, order, inventory, step):
@@ -325,40 +327,45 @@ def manage_transactions(T):
             transactionID = order[:-4] + "_" + str(X)
             print(transactionID)
             order_data = divide_to_sites(list(csv.reader(curr_order)))
-            return_dict[-1], return_dict[0], return_dict[1], return_dict[2] = True, True, True, True
-            transaction_proc = Process(target=manage_transaction, args=(transactionID, order_data, data, return_dict))
-            transaction_proc.start()
-            transaction_proc.join(timeout=T)
-            if transaction_proc.is_alive():
-                transaction_proc.terminate()
-                if return_dict[0]:
-                    undo(transactionID, {}, order_data, data)
-                    failed_transactions.append(transactionID)
-                    print(transactionID + " timed out")
-                elif not return_dict[0] and return_dict[1]:
-                    undo(transactionID, return_dict["inventory"], order_data, data)
-                    failed_transactions.append(transactionID)
-                    print(transactionID + " timed out")
-                elif not return_dict[1] and return_dict[2]:
-                    site_cursors = {str(site): DBconnect(uid) for site, uid in data if
-                                    str(site) in order_data.keys()}
-                    for site in order_data.keys():
-                        sit_cur = site_cursors[site]
-                        for productID, _ in order_data[site]:
-                            lock_management(sit_cur, transactionID, productID, 'release', 'write')
-                        successful_transactions.append(transactionID)
-                    print(transactionID + " timed out but passed")
-
-            else:
-                if return_dict[-1]:
-                    successful_transactions.append(transactionID)
-                    print(transactionID + " passed")
+            for i in range(5):
+                return_dict[-1], return_dict[0], return_dict[1], return_dict[2] = True, True, True, True
+                transaction_proc = Process(target=manage_transaction, args=(transactionID, order_data, data, return_dict))
+                start = time()
+                transaction_proc.start()
+                transaction_proc.join(timeout=T)
+                if transaction_proc.is_alive():
+                    transaction_proc.terminate()
+                    print(f"timed out after {time() - start} seconds")
+                    if return_dict[0]:
+                        print(transactionID + " timed out")
+                        undo(transactionID, {}, order_data, data)
+                        failed_transactions.append(transactionID)
+                    elif not return_dict[0] and return_dict[1]:
+                        print(transactionID + " timed out")
+                        undo(transactionID, return_dict["inventory"], order_data, data)
+                        failed_transactions.append(transactionID)
+                    elif not return_dict[1] and return_dict[2]:
+                        site_cursors = {str(site): DBconnect(uid) for site, uid in data if
+                                        str(site) in order_data.keys()}
+                        for site in order_data.keys():
+                            sit_cur = site_cursors[site]
+                            for productID, _ in order_data[site]:
+                                lock_management(sit_cur, transactionID, productID, 'release', 'write')
+                            successful_transactions.append(transactionID)
+                        print(transactionID + " timed out but passed")
+                        break
 
                 else:
-                    undo(transactionID, {}, order_data, data)
-                    failed_transactions.append(transactionID)
-                    print(transactionID + " failed")
-        return_dict.clear()
+                    if return_dict[-1]:
+                        print(f"passed after {time() - start} seconds")
+                        successful_transactions.append(transactionID)
+                        break
+                    else:
+                        print(transactionID + " failed")
+                        undo(transactionID, {}, order_data, data)
+                        failed_transactions.append(transactionID)
+                        break
+            return_dict.clear()
 
 
 if __name__ == '__main__':
@@ -366,8 +373,6 @@ if __name__ == '__main__':
     drop_tables(cur)
     create_tables(cur)
     update_inventory("Updating Inventory")
-    print("Stocked up")
-    manage_transactions(25)
-    update_inventory("Updating Inventory")
-
-
+    # manage_transactions(15)
+    # update_inventory("Updating Inventory")
+#
