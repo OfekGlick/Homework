@@ -373,6 +373,6 @@ if __name__ == '__main__':
     drop_tables(cur)
     create_tables(cur)
     update_inventory("Updating Inventory")
-    # manage_transactions(15)
-    # update_inventory("Updating Inventory")
-#
+#     manage_transactions(30)
+#     update_inventory("Updating Inventory")
+# #
