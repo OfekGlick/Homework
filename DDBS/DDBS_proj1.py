@@ -126,6 +126,7 @@ def lock_management(cursor, transactionID, productID, action, lock_type):
                                                 and productID={productID}
                                                 and lockType='{lock_type}'
         """
+        update_log(cursor, transactionID, 'Locks', productID, 'read', check)
         if len(cursor.execute(check).fetchall()) != 0:
             release_lock = f"""DELETE FROM Locks WHERE transactionID='{transactionID}'
                                                     and productID={productID}
@@ -161,6 +162,8 @@ def update_inventory(transactionID):
                 cursor.execute(query.format(amount, i + 1))
             cursor.commit()
         else:
+            [lock_management(cursor, transactionID, productID + 1, 'release', 'write') for productID, amount in
+             enumerate(inven)]
             return
     except pyodbc.IntegrityError:
         for i, amount in enumerate(inven):
@@ -168,7 +171,6 @@ def update_inventory(transactionID):
                         ({i + 1},{amount})"""
             cursor.execute(query).commit()
             update_log(cursor, transactionID, 'ProductsInventory', i + 1, 'insert', query)
-    [lock_management(cursor, transactionID, i, 'release', 'write') for i in range(1, 12)]
     print("Stocked up")
 
 
@@ -219,7 +221,7 @@ def update_productOrder(cursor, transactionID, site_order):
         cursor.execute(sqlquery, (transactionID, productID, amount))
 
 
-def manage_transaction(transactionID, order, data, return_dict):
+def manage_transaction(transactionID, order, data, proc_status, prev_orders):
     relevant = deque([(site, uid, 1) for site, uid in data if str(site) in order.keys()])
     cursor_lst = []
     inventory = {site: [] for site in order.keys()}
@@ -232,7 +234,7 @@ def manage_transaction(transactionID, order, data, return_dict):
             cursor, step, site_inventory = execute_query_on_site(
                 site_cur, transactionID, site_order, inventory[str(site)], step)
             if step == -2:
-                return_dict[-1] = False
+                proc_status[-1] = False
                 return
             inventory[str(site)] = site_inventory
             if step != -1:
@@ -244,9 +246,9 @@ def manage_transaction(transactionID, order, data, return_dict):
         if not flag:
             break
 
-    return_dict["inventory"] = inventory
+    proc_status["inventory"] = inventory
 
-    return_dict[0] = False
+    proc_status[0] = False
 
     for cursor, site, site_order in cursor_lst:
         update_productOrder(cursor, transactionID, site_order)
@@ -254,12 +256,12 @@ def manage_transaction(transactionID, order, data, return_dict):
     for cursor, _, _ in cursor_lst:
         cursor.commit()
 
-    return_dict[1] = False
+    proc_status[1] = False
 
     for cursor, _, site_order in cursor_lst:
         [lock_management(cursor, transactionID, productID, 'release', 'write') for productID, _ in site_order]
 
-    return_dict[2] = False
+    proc_status[2] = False
 
 
 def undo(transactionID, prev_inventory: dict, order_data, site_to_uid):
@@ -317,55 +319,83 @@ def manage_transactions(T):
     bigserver_cursor = DBconnect('dbteam')
     bigserver_cursor.execute("select * from categoriestosites")
     data = bigserver_cursor.fetchall()
-    path = r"C:\Users\Ofek\PycharmProjects\GitRepo\DDBS\orders"
     manager = multiprocessing.Manager()
-    return_dict = manager.dict()
+    proc_status = manager.dict()
+    orders = sorted(os.listdir("orders"))
     successful_transactions = []
     failed_transactions = []
-    for order in sorted(os.listdir(path)):
-        with open(pth.join(path, order), encoding='utf-8-sig') as curr_order:
-            transactionID = order[:-4] + "_" + str(X)
-            print(transactionID)
-            order_data = divide_to_sites(list(csv.reader(curr_order)))
-            for i in range(5):
-                return_dict[-1], return_dict[0], return_dict[1], return_dict[2] = True, True, True, True
-                transaction_proc = Process(target=manage_transaction, args=(transactionID, order_data, data, return_dict))
-                start = time()
-                transaction_proc.start()
-                transaction_proc.join(timeout=T)
-                if transaction_proc.is_alive():
-                    transaction_proc.terminate()
-                    print(f"timed out after {time() - start} seconds")
-                    if return_dict[0]:
-                        print(transactionID + " timed out")
-                        undo(transactionID, {}, order_data, data)
-                        failed_transactions.append(transactionID)
-                    elif not return_dict[0] and return_dict[1]:
-                        print(transactionID + " timed out")
-                        undo(transactionID, return_dict["inventory"], order_data, data)
-                        failed_transactions.append(transactionID)
-                    elif not return_dict[1] and return_dict[2]:
-                        site_cursors = {str(site): DBconnect(uid) for site, uid in data if
-                                        str(site) in order_data.keys()}
-                        for site in order_data.keys():
-                            sit_cur = site_cursors[site]
-                            for productID, _ in order_data[site]:
-                                lock_management(sit_cur, transactionID, productID, 'release', 'write')
-                            successful_transactions.append(transactionID)
-                        print(transactionID + " timed out but passed")
-                        break
+    iterations_allowed = len(orders) * 10
+    for i in range(iterations_allowed):
+        print(f"ITERATION NO.{i+1}")
+        prev_orders = dict()
+        timed_out_orders = []
+        if len(orders) > 0:
+            for order in orders:
+                print(f"Waiting orders are :{prev_orders.keys()}")
+                with open(pth.join("orders", order), encoding='utf-8-sig') as curr_order:
+                    transactionID = order[:-4] + "_" + str(X)
+                    print(transactionID)
+                    order_data = divide_to_sites(list(csv.reader(curr_order)))
 
-                else:
-                    if return_dict[-1]:
-                        print(f"passed after {time() - start} seconds")
-                        successful_transactions.append(transactionID)
-                        break
+                    # Checking transaction is executable
+                    prev_orders_temp = [
+                        [[(site, productID) for productID, _ in suborder] for site, suborder in prev_order.items()] for
+                        prev_order in prev_orders.values()]
+                    flat_list = [item for sublist in prev_orders_temp for item in sublist]
+                    prev_orders_temp = [item for sublist in flat_list for item in sublist]
+
+                    cur_order = [[(site, productID) for productID, _ in site_order] for site, site_order in
+                                 order_data.items()]
+                    cur_order = [item for sublist in cur_order for item in sublist]
+
+                    # If not than switch to next order
+                    if bool(set(prev_orders_temp) & set(cur_order)):
+                        print(f"transaction {transactionID} needs to wait")
+                        prev_orders[order] = order_data
+                        timed_out_orders.append(order)
+                        continue
+
+                    proc_status[-1], proc_status[0], proc_status[1], proc_status[2], proc_status[
+                        5] = True, True, True, True, True
+                    transaction_proc = Process(target=manage_transaction,
+                                               args=(transactionID, order_data, data, proc_status, prev_orders))
+                    start = time()
+                    transaction_proc.start()
+                    transaction_proc.join(timeout=T)
+                    if transaction_proc.is_alive():
+                        transaction_proc.terminate()
+                        if proc_status[0]:
+                            print(f"{transactionID} timed out after {time() - start} seconds")
+                            undo(transactionID, {}, order_data, data)
+                            timed_out_orders.append(order)
+                            prev_orders[order] = order_data
+                        elif not proc_status[0] and proc_status[1]:
+                            print(f"{transactionID} timed out after {time() - start} seconds")
+                            undo(transactionID, proc_status["inventory"], order_data, data)
+                            timed_out_orders.append(order)
+                            prev_orders[order] = order_data
+                        elif not proc_status[1] and proc_status[2]:
+                            site_cursors = {str(site): DBconnect(uid) for site, uid in data if
+                                            str(site) in order_data.keys()}
+                            for site in order_data.keys():
+                                sit_cur = site_cursors[site]
+                                for productID, _ in order_data[site]:
+                                    lock_management(sit_cur, transactionID, productID, 'release', 'write')
+                                successful_transactions.append(transactionID)
+                            print(transactionID + " timed out but passed")
                     else:
-                        print(transactionID + " failed")
-                        undo(transactionID, {}, order_data, data)
-                        failed_transactions.append(transactionID)
-                        break
-            return_dict.clear()
+                        if proc_status[-1]:
+                            print(f"passed after {time() - start} seconds")
+                            successful_transactions.append(transactionID)
+                        else:
+                            print(transactionID + " failed")
+                            undo(transactionID, {}, order_data, data)
+                            failed_transactions.append(transactionID)
+                proc_status.clear()
+            orders = timed_out_orders
+            print()
+        else:
+            break
 
 
 if __name__ == '__main__':
@@ -373,6 +403,5 @@ if __name__ == '__main__':
     drop_tables(cur)
     create_tables(cur)
     update_inventory("Updating Inventory")
-#     manage_transactions(30)
-#     update_inventory("Updating Inventory")
-# #
+    manage_transactions(40)
+    # update_inventory("Updating Inventory")
