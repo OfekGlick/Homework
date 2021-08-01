@@ -1,4 +1,6 @@
 import findspark
+import pyodbc
+
 findspark.init()
 from pyspark.sql import SparkSession
 import pyspark.sql.functions as F
@@ -11,6 +13,16 @@ def init_spark(app_name):
     spark = SparkSession.builder.appName(app_name).getOrCreate()
     sc = spark.sparkContext
     return spark, sc
+
+
+def DBconnect(username):
+    conn = pyodbc.connect('DRIVER={SQL Server};'
+                          'SERVER=technionddscourse.database.windows.net;'
+                          f'DATABASE={username};'
+                          f'UID={username};'
+                          'PWD=Qwerty12!')
+    cursor = conn.cursor()
+    return cursor
 
 
 # environment data
@@ -40,34 +52,50 @@ noaa_schema = StructType([StructField('StationId', StringType(), False),
                           StructField('S_Flag', StringType(), True),
                           StructField('ObsTime', StringType(), True)])
 
+# ETL_schema = StructType([StructField('StationId', StringType(), False),
+#                          StructField('Date', StringType(), False),
+#                          StructField('PRCP', IntegerType(), True),
+#                          StructField('TMAX', IntegerType(), True),
+#                          StructField('TMIN', IntegerType(), True),
+#                          StructField('TAVG', IntegerType(), True)])
+
 string_value_df = spark \
     .readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", kafka_server) \
     .option("subscribe", "IS") \
-    .option("rowsPerSecond", 1000) \
+    .option("maxOffsetsPerTrigger", 1000) \
     .option("startingOffsets", "earliest") \
     .load().selectExpr("CAST(value AS STRING)")
-#
 json_df = string_value_df.select(F.from_json(F.col("value"), schema=noaa_schema).alias('json'))
 streaming_df = json_df.select("json.*")
+cursor = DBconnect(username)
 
 
 def handle_batch(batch_df, batch_id):
     print(batch_id)
-    batch_df = batch_df.groupby("StationId", "Date").pivot("Variable") \
-        .agg(F.first("Value"))
-    batch_df = batch_df.withColumn("Date",
-                                   F.concat(F.expr("substring(Date,0,4)"), F.lit("-"), F.expr("substring(Date,5,2)"),
-                                            F.lit("-"),
-                                            F.expr("substring(Date,7,2)"))) \
-        .withColumn("Date", F.to_timestamp(F.expr("substring(Date,0,10)"), "yyyy-MM-dd"))
+    # batch_df = batch_df.groupby("StationId", "Date").pivot("Variable") \
+    #     .agg(F.first("Value"))
+    # batch_df = batch_df.withColumn("Date",
+    #                                F.concat(F.expr("substring(Date,0,4)"), F.lit("-"), F.expr("substring(Date,5,2)"),
+    #                                         F.lit("-"),
+    #                                         F.expr("substring(Date,7,2)"))) \
+    #     .withColumn("Date", F.to_timestamp(F.expr("substring(Date,0,10)"), "yyyy-MM-dd"))
     batch_df.show(20, False)
+    # batch_cols = batch_df.schema.names
+    # print(batch_cols)
+    # cols = cursor.execute(
+    #     "SELECT Column_name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = N'Project2' ").fetchall()
+    # cols = [row[0] for row in cols]
+    # missing_cols = [col for col in batch_cols if col not in cols]
+    # query = "ALTER TABLE Project2 ADD {} integer"
+    # for col in missing_cols:
+    #     cursor.execute(query.format(col))
     # Tried append and overwrite
     try:
         batch_df.write \
             .format("jdbc") \
-            .mode("overwrite") \
+            .mode("append") \
             .option("url", url) \
             .option("dbtable", table_name) \
             .option("user", username) \
@@ -79,7 +107,7 @@ def handle_batch(batch_df, batch_id):
 
 query = streaming_df \
     .writeStream \
-    .trigger(processingTime='2 seconds') \
+    .trigger(processingTime='20 seconds') \
     .foreachBatch(handle_batch) \
     .outputMode("append") \
     .start() \
